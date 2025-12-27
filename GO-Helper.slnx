@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="GO-Helper.vcxproj" Id="00d4a2f1-aaf9-4140-8f65-3dba9b015ff3" />
+</Solution>
