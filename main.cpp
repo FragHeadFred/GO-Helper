@@ -1,9 +1,20 @@
-﻿/* GO-Helper Application
-   Version: 0.122.2025.12.27
-   Update: Title Y-Offset -1px (Final Alignment: 17px)
+/* GO-Helper Application 
+   Version: 0.125.2025.12.27
+   Update: Add Legion L + X button Intercept and Capture
+   Features: 
+   - 2.3MB Memory Usage: Optimized Win32/WMI footprint for background operation
+   - MS-Gamebar Fix: Registry fix to disable annoying MS-Gamebar Pop-up
+   - App Icon Integration: Custom branding via IDI_ICON1 resources
+   - WMI SKU/Model Detection: Displays specific Legion Go model/SKU
+   - Thermal Mode Control: Quiet, Balanced, and Performance switching
+   - Controller-to-Mouse Emulation: RS = Move, RB = Left Click, RT = Right Click
+   - Real-time Battery Status: Tracking percentage and AC/DC power state
+   - CPU Temp Monitoring: Real-time ACPI thermal zone polling (Celsius/Fahrenheit)
+   - Global Hotkey (Ctrl + G) & Hardware Intercept (Legion L/X): Summon with Topmost focus
+   - Tray Menu: Includes Mute (Default: ON), Gamebar Fix, and Exit
 */
 
-#define APP_VERSION L"0.122.2025.12.27"
+#define APP_VERSION L"0.125.2025.12.27"
 #define _WIN32_WINNT 0x0601 
 #define _WIN32_DCOM  
 
@@ -19,6 +30,7 @@
 #include <dwmapi.h>  
 #include "resource.h" 
 
+// --- LIBRARIES ---
 #pragma comment(lib, "wbemuuid.lib")
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "shell32.lib")
@@ -31,7 +43,7 @@
 #pragma comment(lib, "uxtheme.lib")
 #pragma comment(lib, "dwmapi.lib")
 
-// --- IDS & COLORS ---
+// --- CONSTANTS ---
 #define BTN_QUIET 101
 #define BTN_BALANCED 102
 #define BTN_PERFORMANCE 103
@@ -43,6 +55,7 @@
 #define ID_TRAY_DISABLE_GB 203
 #define ID_TRAY_MUTE_APP 204
 
+// --- UI THEME COLORS ---
 #define CLR_BACK      RGB(20, 20, 20)
 #define CLR_CARD      RGB(45, 45, 45)
 #define CLR_TEXT      RGB(240, 240, 240)
@@ -60,16 +73,49 @@ HWND g_hwnd = NULL;
 HHOOK g_hHook = NULL;
 NOTIFYICONDATAW g_nid = { 0 };
 HICON g_hMainIcon = NULL;
-bool g_appMuted = true;
-bool g_mouseEnabled = true;
-int g_currentSenseVal = 5;
-float g_mouseSensitivity = 5 * 0.0005f;
+HBRUSH g_hBackBrush = NULL; 
+bool g_appMuted = true;               // Default: Muted ON
+bool g_mouseEnabled = true;           
+int g_currentSenseVal = 5;            
+float g_mouseSensitivity = 5 * 0.0005f; 
 
 const int WIN_WIDTH = 350;
 const int WIN_HEIGHT = 255;
 
-// --- LOGIC FUNCTIONS ---
+// --- LOGIC: CPU TEMPERATURE ---
+// Polls MSAcpi_ThermalZoneTemperature via WMI
+std::wstring GetCPUTempString() {
+    long tempDK = 0;
+    HRESULT hr = CoInitializeEx(0, COINIT_MULTITHREADED);
+    if (FAILED(hr) && hr != RPC_E_CHANGED_MODE) return L"CPU: --";
+    IWbemLocator* pLoc = NULL;
+    if (SUCCEEDED(CoCreateInstance(__uuidof(WbemLocator), 0, CLSCTX_INPROC_SERVER, __uuidof(IWbemLocator), (LPVOID*)&pLoc))) {
+        IWbemServices* pSvc = NULL;
+        if (SUCCEEDED(pLoc->ConnectServer(_bstr_t(L"ROOT\\WMI"), NULL, NULL, 0, NULL, 0, 0, &pSvc))) {
+            CoSetProxyBlanket(pSvc, RPC_C_AUTHN_WINNT, RPC_C_AUTHN_NONE, NULL, RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE, NULL, EOAC_NONE);
+            IEnumWbemClassObject* pEnum = NULL;
+            if (SUCCEEDED(pSvc->ExecQuery(_bstr_t(L"WQL"), _bstr_t(L"SELECT CurrentTemperature FROM MSAcpi_ThermalZoneTemperature"), WBEM_FLAG_FORWARD_ONLY, NULL, &pEnum))) {
+                IWbemClassObject* pObj = NULL; ULONG uRet = 0;
+                if (SUCCEEDED(pEnum->Next(WBEM_INFINITE, 1, &pObj, &uRet)) && uRet > 0) {
+                    VARIANT vt;
+                    if (SUCCEEDED(pObj->Get(L"CurrentTemperature", 0, &vt, 0, 0))) { tempDK = vt.lVal; VariantClear(&vt); }
+                    pObj->Release();
+                }
+                pEnum->Release();
+            }
+            pSvc->Release();
+        }
+        pLoc->Release();
+    }
+    CoUninitialize();
+    if (tempDK <= 0) return L"CPU: --";
+    double celsius = (tempDK / 10.0) - 273.15;
+    double fahrenheit = (celsius * 9.0 / 5.0) + 32.0;
+    wchar_t buf[64]; swprintf_s(buf, L"CPU: %.0f°C / %.0f°F", celsius, fahrenheit);
+    return std::wstring(buf);
+}
 
+// --- LOGIC: GAMEBAR FIX ---
 void DisableGameBarRegistry() {
     HKEY hKey;
     if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\GameDVR", 0, KEY_SET_VALUE, &hKey) == ERROR_SUCCESS) {
@@ -81,6 +127,7 @@ void DisableGameBarRegistry() {
     MessageBoxW(NULL, L"Game Bar features disabled. Restart recommended.", L"GO-Helper", MB_OK | MB_ICONINFORMATION);
 }
 
+// --- LOGIC: THERMAL & BATTERY ---
 std::wstring GetThermalModeString() {
     int mode = 0;
     HRESULT hr = CoInitializeEx(0, COINIT_MULTITHREADED);
@@ -172,6 +219,7 @@ bool SetThermalMode(int value) {
     return success;
 }
 
+// --- LOGIC: SKU DETECTION ---
 std::wstring GetSystemSKU() {
     std::wstring biosModel = L""; std::wstring biosSKU = L"";
     HRESULT hr = CoInitializeEx(0, COINIT_MULTITHREADED);
@@ -202,8 +250,7 @@ std::wstring GetSystemSKU() {
     return (biosSKU.empty() || biosSKU == L"Default string") ? biosModel : biosModel + L" (" + biosSKU + L")";
 }
 
-// --- UI UTILS ---
-
+// --- UI UTILS & FOCUS ---
 void RepositionToBottomRight(HWND hwnd) {
     MONITORINFO mi = { sizeof(mi) };
     if (GetMonitorInfo(MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY), &mi)) {
@@ -218,12 +265,15 @@ void ToggleVisibility(HWND hwnd) {
     else {
         RepositionToBottomRight(hwnd);
         ShowWindow(hwnd, SW_SHOW);
-        SetForegroundWindow(hwnd);
+        ShowWindow(hwnd, SW_RESTORE); // Ensure not minimized
+        UpdateWindow(hwnd); 
+        SetForegroundWindow(hwnd);    // Take Focus
         SetActiveWindow(hwnd);
         SetFocus(hwnd);
     }
 }
 
+// --- CONTROLLER MOUSE ---
 void ProcessControllerMouse() {
     if (!g_mouseEnabled) return;
     XINPUT_STATE state;
@@ -254,6 +304,7 @@ void ProcessControllerMouse() {
     }
 }
 
+// --- RENDERING ---
 void DrawGButton(HDC hdc, RECT rc, LPCWSTR text, COLORREF color, bool pressed) {
     HBRUSH hBackBr = CreateSolidBrush(CLR_BACK); FillRect(hdc, &rc, hBackBr); DeleteObject(hBackBr);
     HBRUSH hBr = CreateSolidBrush(pressed ? color : CLR_CARD);
@@ -295,14 +346,19 @@ LRESULT CALLBACK SliderSubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM 
     return DefSubclassProc(hWnd, uMsg, wParam, lParam);
 }
 
+// --- WINDOW PROCEDURE ---
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     static HFONT hFontBold, hFontSmall; static std::wstring skuText; static HWND hSlider;
     static UINT_PTR refreshTimer = 0;
 
     switch (uMsg) {
     case WM_ERASEBKGND: return 1;
+    case WM_CTLCOLORBTN:
+    case WM_CTLCOLORSTATIC: return (LRESULT)g_hBackBrush;
+
     case WM_CREATE:
     {
+        g_hBackBrush = CreateSolidBrush(CLR_BACK);
         g_hMainIcon = (HICON)LoadImageW(GetModuleHandle(NULL), MAKEINTRESOURCEW(IDI_ICON1), IMAGE_ICON, 32, 32, LR_SHARED);
         SendMessage(hwnd, WM_SETICON, ICON_BIG, (LPARAM)g_hMainIcon);
         SendMessage(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)g_hMainIcon);
@@ -340,42 +396,33 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         HDC memDC = CreateCompatibleDC(hdc);
         HBITMAP memBM = CreateCompatibleBitmap(hdc, rc.right, rc.bottom);
         SelectObject(memDC, memBM);
-        HBRUSH hBack = CreateSolidBrush(CLR_BACK); FillRect(memDC, &rc, hBack); DeleteObject(hBack);
+        FillRect(memDC, &rc, g_hBackBrush);
 
         if (g_hMainIcon) DrawIconEx(memDC, 20, 15, g_hMainIcon, 18, 18, 0, NULL, DI_NORMAL);
 
         SelectObject(memDC, hFontBold); SetTextColor(memDC, CLR_TEXT); SetBkMode(memDC, TRANSPARENT);
-
-        // --- FINAL Y-OFFSET: 17px ---
         std::wstring title = L"GO-Helper";
         TextOutW(memDC, 45, 17, title.c_str(), (int)title.length());
-
         SIZE sz; GetTextExtentPoint32W(memDC, title.c_str(), (int)title.length(), &sz);
-        int dashX = 45 + sz.cx + 5;
-        int dashY = 17 + (sz.cy / 2) + 1;
-
-        HPEN hDashPen = CreatePen(PS_SOLID, 1, CLR_TEXT);
-        SelectObject(memDC, hDashPen);
-        MoveToEx(memDC, dashX, dashY, NULL);
-        LineTo(memDC, dashX + 8, dashY);
-        DeleteObject(hDashPen);
-
+        int dashX = 45 + sz.cx + 5; int dashY = 17 + (sz.cy / 2) + 1; 
+        HPEN hDashPen = CreatePen(PS_SOLID, 1, CLR_TEXT); SelectObject(memDC, hDashPen);
+        MoveToEx(memDC, dashX, dashY, NULL); LineTo(memDC, dashX + 8, dashY); DeleteObject(hDashPen);
         TextOutW(memDC, dashX + 14, 17, skuText.c_str(), (int)skuText.length());
+        
+        std::wstring therm = L"Thermal Mode: " + GetThermalModeString();
+        TextOutW(memDC, 20, 50, therm.c_str(), (int)therm.length());
 
-        // Thermal Info
-        TextOutW(memDC, 20, 50, (L"Thermal Mode: " + GetThermalModeString()).c_str(), (int)(L"Thermal Mode: " + GetThermalModeString()).length());
+        std::wstring cpuTemp = GetCPUTempString();
+        SIZE cpSz; GetTextExtentPoint32W(memDC, cpuTemp.c_str(), (int)cpuTemp.length(), &cpSz);
+        TextOutW(memDC, rc.right - cpSz.cx - 20, 50, cpuTemp.c_str(), (int)cpuTemp.length());
 
-        // Mouse Sense
         SetTextColor(memDC, g_mouseEnabled ? CLR_TEXT : CLR_DISABLED);
         std::wstring sStr = L"Sensitivity: " + std::to_wstring(g_currentSenseVal * 2) + L"%";
         TextOutW(memDC, 195, 144, sStr.c_str(), (int)sStr.length());
-
-        // Battery
         SetTextColor(memDC, CLR_TEXT);
         std::wstring bat = GetBatteryStatusString();
         TextOutW(memDC, 20, 205, bat.c_str(), (int)bat.length());
 
-        // Bottom Version
         SelectObject(memDC, hFontSmall); SetTextColor(memDC, CLR_VERSION);
         std::wstring vStr = L"Version: " + std::wstring(APP_VERSION);
         SIZE vS; GetTextExtentPoint32W(memDC, vStr.c_str(), (int)vStr.length(), &vS);
@@ -384,7 +431,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         BitBlt(hdc, 0, 0, rc.right, rc.bottom, memDC, 0, 0, SRCCOPY);
         DeleteObject(memBM); DeleteDC(memDC); EndPaint(hwnd, &ps);
     }
-                 break;
+    break;
 
     case WM_DRAWITEM: {
         LPDRAWITEMSTRUCT pdis = (LPDRAWITEMSTRUCT)lParam;
@@ -405,15 +452,15 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         break;
 
     case WM_COMMAND:
-        switch (LOWORD(wParam)) {
-        case BTN_QUIET: SetThermalMode(1); break;
-        case BTN_BALANCED: SetThermalMode(2); break;
-        case BTN_PERFORMANCE: SetThermalMode(3); break;
-        case BTN_MOUSE_TOGGLE: g_mouseEnabled = !g_mouseEnabled; EnableWindow(hSlider, g_mouseEnabled); InvalidateRect(hwnd, NULL, TRUE); break;
-        case ID_TRAY_MUTE_APP: g_appMuted = !g_appMuted; break;
-        case ID_TRAY_DISABLE_GB: DisableGameBarRegistry(); break;
-        case ID_TRAY_EXIT: DestroyWindow(hwnd); break;
-        case ID_TRAY_TOGGLE: ToggleVisibility(hwnd); break;
+        switch(LOWORD(wParam)) {
+            case BTN_QUIET: SetThermalMode(1); InvalidateRect(hwnd, NULL, FALSE); break;
+            case BTN_BALANCED: SetThermalMode(2); InvalidateRect(hwnd, NULL, FALSE); break;
+            case BTN_PERFORMANCE: SetThermalMode(3); InvalidateRect(hwnd, NULL, FALSE); break;
+            case BTN_MOUSE_TOGGLE: g_mouseEnabled = !g_mouseEnabled; EnableWindow(hSlider, g_mouseEnabled); InvalidateRect(hwnd, NULL, TRUE); break;
+            case ID_TRAY_MUTE_APP: g_appMuted = !g_appMuted; break;
+            case ID_TRAY_DISABLE_GB: DisableGameBarRegistry(); break;
+            case ID_TRAY_EXIT: DestroyWindow(hwnd); break;
+            case ID_TRAY_TOGGLE: ToggleVisibility(hwnd); break;
         }
         break;
 
@@ -428,19 +475,36 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             POINT pt; GetCursorPos(&pt); SetForegroundWindow(hwnd);
             TrackPopupMenu(hM, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, NULL);
             DestroyMenu(hM);
-        }
-        else if (lParam == WM_LBUTTONUP) ToggleVisibility(hwnd);
+        } else if (lParam == WM_LBUTTONUP) ToggleVisibility(hwnd);
         break;
 
-    case WM_DESTROY: KillTimer(hwnd, refreshTimer); Shell_NotifyIconW(NIM_DELETE, &g_nid); PostQuitMessage(0); break;
+    case WM_DESTROY: 
+        KillTimer(hwnd, refreshTimer); 
+        Shell_NotifyIconW(NIM_DELETE, &g_nid); 
+        if (g_hBackBrush) DeleteObject(g_hBackBrush);
+        PostQuitMessage(0); 
+        break;
     }
     return DefWindowProcW(hwnd, uMsg, wParam, lParam);
 }
 
-LRESULT CALLBACK KeyboardHookProc(int nCode, WPARAM wParam, LPARAM lParam) {
+// --- KEYBOARD HOOK: INTERCEPT HARDWARE BUTTONS ---
+LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
     if (nCode == HC_ACTION && (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN)) {
         KBDLLHOOKSTRUCT* pK = (KBDLLHOOKSTRUCT*)lParam;
-        if ((GetAsyncKeyState(VK_CONTROL) & 0x8000) && pK->vkCode == 'G') { ToggleVisibility(g_hwnd); return 1; }
+        
+        bool isWinDown = (GetAsyncKeyState(VK_LWIN) & 0x8000) || (GetAsyncKeyState(VK_RWIN) & 0x8000);
+        bool isShiftDown = (GetAsyncKeyState(VK_SHIFT) & 0x8000);
+        bool isCtrlDown = (GetAsyncKeyState(VK_CONTROL) & 0x8000);
+
+        // Intercept logic for:
+        // 1. Legion L (PrintScreen / Snapshot)
+        // 2. Legion X (Win + Shift + S / Snapshot)
+        // 3. Ctrl + G (Global Summon)
+        if (pK->vkCode == VK_SNAPSHOT || (isWinDown && isShiftDown && pK->vkCode == 'S') || (isCtrlDown && pK->vkCode == 'G')) {
+            ToggleVisibility(g_hwnd);
+            return 1; // Eat the key to prevent default action
+        }
     }
     return CallNextHookEx(g_hHook, nCode, wParam, lParam);
 }
@@ -452,14 +516,18 @@ int WINAPI wWinMain(HINSTANCE hI, HINSTANCE, PWSTR, int) {
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
 
     RegisterClassW(&wc);
-    g_hwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_LAYERED, L"GOHCLASS", L"GO-Helper", WS_POPUP, 0, 0, WIN_WIDTH, WIN_HEIGHT, NULL, NULL, hI, NULL);
+    g_hwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_LAYERED, L"GOHCLASS", L"GO-Helper", WS_POPUP | WS_CLIPCHILDREN, 0, 0, WIN_WIDTH, WIN_HEIGHT, NULL, NULL, hI, NULL);
     SetLayeredWindowAttributes(g_hwnd, 0, 250, LWA_ALPHA);
-    g_hHook = SetWindowsHookEx(WH_KEYBOARD_LL, KeyboardHookProc, hI, 0);
+
+    // Register global low-level keyboard hook
+    g_hHook = SetWindowsHookEx(WH_KEYBOARD_LL, LowLevelKeyboardProc, hI, 0);
+
     ShowWindow(g_hwnd, SW_HIDE);
     MSG m;
     while (true) {
         if (PeekMessage(&m, NULL, 0, 0, PM_REMOVE)) { if (m.message == WM_QUIT) break; TranslateMessage(&m); DispatchMessage(&m); }
-        ProcessControllerMouse(); Sleep(5);
+        ProcessControllerMouse(); Sleep(5); // Polling for controller movement
     }
-    UnhookWindowsHookEx(g_hHook); return 0;
+    if (g_hHook) UnhookWindowsHookEx(g_hHook);
+    return 0;
 }
