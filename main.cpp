@@ -1,8 +1,9 @@
 /* GO-Helper Application 
-   Version: 0.125.2025.12.27
-   Update: Add Legion L + X button Intercept and Capture
+   Version: 0.125.2025.12.28
+   Update: Add Administrator Elevation Check on Startup
    Features: 
-   - 2.3MB Memory Usage: Optimized Win32/WMI footprint for background operation
+   - Admin Check: Auto-elevates to ensure Registry/WMI success
+   - 2.3MB Memory Usage: Optimized Win32/WMI footprint
    - MS-Gamebar Fix: Registry fix to disable annoying MS-Gamebar Pop-up
    - App Icon Integration: Custom branding via IDI_ICON1 resources
    - WMI SKU/Model Detection: Displays specific Legion Go model/SKU
@@ -11,10 +12,10 @@
    - Real-time Battery Status: Tracking percentage and AC/DC power state
    - CPU Temp Monitoring: Real-time ACPI thermal zone polling (Celsius/Fahrenheit)
    - Global Hotkey (Ctrl + G) & Hardware Intercept (Legion L/X): Summon with Topmost focus
-   - Tray Menu: Includes Mute (Default: ON), Gamebar Fix, and Exit
+   - Tray Menu: Includes Mute, Gamebar Fix, Start with Windows, and Exit
 */
 
-#define APP_VERSION L"0.125.2025.12.27"
+#define APP_VERSION L"0.125.2025.12.28"
 #define _WIN32_WINNT 0x0601 
 #define _WIN32_DCOM  
 
@@ -54,6 +55,7 @@
 #define ID_TRAY_TOGGLE 202
 #define ID_TRAY_DISABLE_GB 203
 #define ID_TRAY_MUTE_APP 204
+#define ID_TRAY_START_WITH_WIN 205
 
 // --- UI THEME COLORS ---
 #define CLR_BACK      RGB(20, 20, 20)
@@ -82,8 +84,57 @@ float g_mouseSensitivity = 5 * 0.0005f;
 const int WIN_WIDTH = 350;
 const int WIN_HEIGHT = 255;
 
+// --- LOGIC: ELEVATION CHECK ---
+bool IsRunAsAdmin() {
+    BOOL fIsRunAsAdmin = FALSE;
+    PSID pAdministratorsGroup = NULL;
+    SID_IDENTIFIER_AUTHORITY NtAuthority = SECURITY_NT_AUTHORITY;
+    if (AllocateAndInitializeSid(&NtAuthority, 2, SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0, &pAdministratorsGroup)) {
+        CheckTokenMembership(NULL, pAdministratorsGroup, &fIsRunAsAdmin);
+        FreeSid(pAdministratorsGroup);
+    }
+    return fIsRunAsAdmin;
+}
+
+void ElevateNow() {
+    wchar_t szPath[MAX_PATH];
+    if (GetModuleFileNameW(NULL, szPath, MAX_PATH)) {
+        SHELLEXECUTEINFOW sei = { sizeof(sei) };
+        sei.lpVerb = L"runas";
+        sei.lpFile = szPath;
+        sei.hwnd = NULL;
+        sei.nShow = SW_NORMAL;
+        if (!ShellExecuteExW(&sei)) return;
+        else exit(0);
+    }
+}
+
+// --- LOGIC: AUTO-START REGISTRY ---
+bool IsAutoStartEnabled() {
+    HKEY hKey;
+    bool enabled = false;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        if (RegQueryValueExW(hKey, L"GO-Helper", NULL, NULL, NULL, NULL) == ERROR_SUCCESS) enabled = true;
+        RegCloseKey(hKey);
+    }
+    return enabled;
+}
+
+void SetAutoStart(bool enable) {
+    HKEY hKey;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_SET_VALUE, &hKey) == ERROR_SUCCESS) {
+        if (enable) {
+            wchar_t path[MAX_PATH];
+            GetModuleFileNameW(NULL, path, MAX_PATH);
+            RegSetValueExW(hKey, L"GO-Helper", 0, REG_SZ, (const BYTE*)path, (wcslen(path) + 1) * sizeof(wchar_t));
+        } else {
+            RegDeleteValueW(hKey, L"GO-Helper");
+        }
+        RegCloseKey(hKey);
+    }
+}
+
 // --- LOGIC: CPU TEMPERATURE ---
-// Polls MSAcpi_ThermalZoneTemperature via WMI
 std::wstring GetCPUTempString() {
     long tempDK = 0;
     HRESULT hr = CoInitializeEx(0, COINIT_MULTITHREADED);
@@ -265,9 +316,9 @@ void ToggleVisibility(HWND hwnd) {
     else {
         RepositionToBottomRight(hwnd);
         ShowWindow(hwnd, SW_SHOW);
-        ShowWindow(hwnd, SW_RESTORE); // Ensure not minimized
+        ShowWindow(hwnd, SW_RESTORE); 
         UpdateWindow(hwnd); 
-        SetForegroundWindow(hwnd);    // Take Focus
+        SetForegroundWindow(hwnd);    
         SetActiveWindow(hwnd);
         SetFocus(hwnd);
     }
@@ -382,6 +433,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         SendMessage(hSlider, TBM_SETRANGE, TRUE, MAKELONG(1, 50));
         SendMessage(hSlider, TBM_SETPOS, TRUE, g_currentSenseVal);
 
+        SetThermalMode(2); // Auto-set Balanced on startup
+
         refreshTimer = SetTimer(hwnd, 1, 3000, NULL);
         COLORREF auraColor = CLR_AURA; DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &auraColor, sizeof(auraColor));
         DWM_WINDOW_CORNER_PREFERENCE cp = DWMWCP_ROUND; DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &cp, sizeof(cp));
@@ -459,6 +512,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             case BTN_MOUSE_TOGGLE: g_mouseEnabled = !g_mouseEnabled; EnableWindow(hSlider, g_mouseEnabled); InvalidateRect(hwnd, NULL, TRUE); break;
             case ID_TRAY_MUTE_APP: g_appMuted = !g_appMuted; break;
             case ID_TRAY_DISABLE_GB: DisableGameBarRegistry(); break;
+            case ID_TRAY_START_WITH_WIN: SetAutoStart(!IsAutoStartEnabled()); break;
             case ID_TRAY_EXIT: DestroyWindow(hwnd); break;
             case ID_TRAY_TOGGLE: ToggleVisibility(hwnd); break;
         }
@@ -469,6 +523,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             HMENU hM = CreatePopupMenu();
             AppendMenuW(hM, MF_STRING, ID_TRAY_TOGGLE, L"Show Menu");
             AppendMenuW(hM, MF_STRING | (g_appMuted ? MF_CHECKED : MF_UNCHECKED), ID_TRAY_MUTE_APP, L"Mute Sounds");
+            AppendMenuW(hM, MF_STRING | (IsAutoStartEnabled() ? MF_CHECKED : MF_UNCHECKED), ID_TRAY_START_WITH_WIN, L"Start with Windows");
             AppendMenuW(hM, MF_STRING, ID_TRAY_DISABLE_GB, L"Disable Game Bar");
             AppendMenuW(hM, MF_SEPARATOR, 0, NULL);
             AppendMenuW(hM, MF_STRING, ID_TRAY_EXIT, L"Exit");
@@ -497,19 +552,21 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
         bool isShiftDown = (GetAsyncKeyState(VK_SHIFT) & 0x8000);
         bool isCtrlDown = (GetAsyncKeyState(VK_CONTROL) & 0x8000);
 
-        // Intercept logic for:
-        // 1. Legion L (PrintScreen / Snapshot)
-        // 2. Legion X (Win + Shift + S / Snapshot)
-        // 3. Ctrl + G (Global Summon)
         if (pK->vkCode == VK_SNAPSHOT || (isWinDown && isShiftDown && pK->vkCode == 'S') || (isCtrlDown && pK->vkCode == 'G')) {
             ToggleVisibility(g_hwnd);
-            return 1; // Eat the key to prevent default action
+            return 1; 
         }
     }
     return CallNextHookEx(g_hHook, nCode, wParam, lParam);
 }
 
 int WINAPI wWinMain(HINSTANCE hI, HINSTANCE, PWSTR, int) {
+    // STARTUP ELEVATION CHECK
+    if (!IsRunAsAdmin()) {
+        ElevateNow();
+        return 0;
+    }
+
     INITCOMMONCONTROLSEX ic = { sizeof(ic), ICC_BAR_CLASSES }; InitCommonControlsEx(&ic);
     WNDCLASSW wc = { 0 }; wc.lpfnWndProc = WindowProc; wc.hInstance = hI; wc.lpszClassName = L"GOHCLASS";
     wc.hIcon = LoadIconW(hI, MAKEINTRESOURCEW(IDI_ICON1));
@@ -519,14 +576,13 @@ int WINAPI wWinMain(HINSTANCE hI, HINSTANCE, PWSTR, int) {
     g_hwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_LAYERED, L"GOHCLASS", L"GO-Helper", WS_POPUP | WS_CLIPCHILDREN, 0, 0, WIN_WIDTH, WIN_HEIGHT, NULL, NULL, hI, NULL);
     SetLayeredWindowAttributes(g_hwnd, 0, 250, LWA_ALPHA);
 
-    // Register global low-level keyboard hook
     g_hHook = SetWindowsHookEx(WH_KEYBOARD_LL, LowLevelKeyboardProc, hI, 0);
 
     ShowWindow(g_hwnd, SW_HIDE);
     MSG m;
     while (true) {
         if (PeekMessage(&m, NULL, 0, 0, PM_REMOVE)) { if (m.message == WM_QUIT) break; TranslateMessage(&m); DispatchMessage(&m); }
-        ProcessControllerMouse(); Sleep(5); // Polling for controller movement
+        ProcessControllerMouse(); Sleep(5); 
     }
     if (g_hHook) UnhookWindowsHookEx(g_hHook);
     return 0;
