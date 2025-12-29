@@ -1,6 +1,6 @@
 /* GO-Helper Application 
-   Version: 0.125.2025.12.28
-   Update: Add Administrator Elevation Check on Startup
+   Version: 0.127.2025.12.28
+   Update: Enhanced Focus Logic and Master v127 Baseline
    Features: 
    - Admin Check: Auto-elevates to ensure Registry/WMI success
    - 2.3MB Memory Usage: Optimized Win32/WMI footprint
@@ -10,12 +10,12 @@
    - Thermal Mode Control: Quiet, Balanced, and Performance switching
    - Controller-to-Mouse Emulation: RS = Move, RB = Left Click, RT = Right Click
    - Real-time Battery Status: Tracking percentage and AC/DC power state
-   - CPU Temp Monitoring: Real-time ACPI thermal zone polling (Celsius/Fahrenheit)
-   - Global Hotkey (Ctrl + G) & Hardware Intercept (Legion L/X): Summon with Topmost focus
-   - Tray Menu: Includes Mute, Gamebar Fix, Start with Windows, and Exit
+   - CPU Temp Monitoring: Real-time ACPI thermal zone polling
+   - Global Hotkey (Ctrl + G) & Hardware Intercept: Summon with Topmost Focus
+   - Tray Menu: Includes Mute (Default ON), Gamebar Fix, Start with Windows, and Exit
 */
 
-#define APP_VERSION L"0.125.2025.12.28"
+#define APP_VERSION L"0.127.2025.12.28"
 #define _WIN32_WINNT 0x0601 
 #define _WIN32_DCOM  
 
@@ -77,7 +77,7 @@ NOTIFYICONDATAW g_nid = { 0 };
 HICON g_hMainIcon = NULL;
 HBRUSH g_hBackBrush = NULL; 
 bool g_appMuted = true;               // Default: Muted ON
-bool g_mouseEnabled = true;           
+bool g_mouseEnabled = true;            
 int g_currentSenseVal = 5;            
 float g_mouseSensitivity = 5 * 0.0005f; 
 
@@ -312,15 +312,27 @@ void RepositionToBottomRight(HWND hwnd) {
 }
 
 void ToggleVisibility(HWND hwnd) {
-    if (IsWindowVisible(hwnd)) ShowWindow(hwnd, SW_HIDE);
-    else {
+    if (IsWindowVisible(hwnd)) {
+        ShowWindow(hwnd, SW_HIDE);
+    } else {
         RepositionToBottomRight(hwnd);
         ShowWindow(hwnd, SW_SHOW);
+        
+        // --- v127 ENHANCED FOCUS LOGIC ---
         ShowWindow(hwnd, SW_RESTORE); 
         UpdateWindow(hwnd); 
         SetForegroundWindow(hwnd);    
         SetActiveWindow(hwnd);
         SetFocus(hwnd);
+        
+        // Force focus by attaching thread input if necessary
+        DWORD dwCurThread = GetCurrentThreadId();
+        DWORD dwFGThread = GetWindowThreadProcessId(GetForegroundWindow(), NULL);
+        if (dwCurThread != dwFGThread) {
+            AttachThreadInput(dwCurThread, dwFGThread, TRUE);
+            SetForegroundWindow(hwnd);
+            AttachThreadInput(dwCurThread, dwFGThread, FALSE);
+        }
     }
 }
 
@@ -552,6 +564,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
         bool isShiftDown = (GetAsyncKeyState(VK_SHIFT) & 0x8000);
         bool isCtrlDown = (GetAsyncKeyState(VK_CONTROL) & 0x8000);
 
+        // Capture Legion L, Legion X, PrintScreen, Win+Shift+S, and Ctrl+G
         if (pK->vkCode == VK_SNAPSHOT || (isWinDown && isShiftDown && pK->vkCode == 'S') || (isCtrlDown && pK->vkCode == 'G')) {
             ToggleVisibility(g_hwnd);
             return 1; 
@@ -581,8 +594,13 @@ int WINAPI wWinMain(HINSTANCE hI, HINSTANCE, PWSTR, int) {
     ShowWindow(g_hwnd, SW_HIDE);
     MSG m;
     while (true) {
-        if (PeekMessage(&m, NULL, 0, 0, PM_REMOVE)) { if (m.message == WM_QUIT) break; TranslateMessage(&m); DispatchMessage(&m); }
-        ProcessControllerMouse(); Sleep(5); 
+        if (PeekMessage(&m, NULL, 0, 0, PM_REMOVE)) { 
+            if (m.message == WM_QUIT) break; 
+            TranslateMessage(&m); 
+            DispatchMessage(&m); 
+        }
+        ProcessControllerMouse(); 
+        Sleep(5); // Balance between 200Hz polling and CPU efficiency
     }
     if (g_hHook) UnhookWindowsHookEx(g_hHook);
     return 0;
