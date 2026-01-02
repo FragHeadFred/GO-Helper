@@ -1,94 +1,143 @@
 /* GO-Helper Application 
-   Version: 0.127.2025.12.28
-   Update: Enhanced Focus Logic and Master v127 Baseline
+   Version: 0.129.2026.01.02
+   Update: Updated memory footprint reference to 2.6MB.
    Features: 
-   - Admin Check: Auto-elevates to ensure Registry/WMI success
-   - 2.3MB Memory Usage: Optimized Win32/WMI footprint
-   - MS-Gamebar Fix: Registry fix to disable annoying MS-Gamebar Pop-up
-   - App Icon Integration: Custom branding via IDI_ICON1 resources
-   - WMI SKU/Model Detection: Displays specific Legion Go model/SKU
-   - Thermal Mode Control: Quiet, Balanced, and Performance switching
-   - Controller-to-Mouse Emulation: RS = Move, RB = Left Click, RT = Right Click
-   - Real-time Battery Status: Tracking percentage and AC/DC power state
-   - CPU Temp Monitoring: Real-time ACPI thermal zone polling
-   - Global Hotkey (Ctrl + G) & Hardware Intercept: Summon with Topmost Focus
-   - Tray Menu: Includes Mute (Default ON), Gamebar Fix, Start with Windows, and Exit
+   - Battery / Charge Status: Tracking percentage and AC/DC power state.
+   - 2.6MB Memory Usage: Optimized Win32 footprint for background operation.
+   - Close Button: Rounded, Black BG, Red Border, White X for quick UI dismissal.
+   - Legion R Listener: Raw HID implementation monitoring Byte 18, Bit 6.
+   - Admin Check: Auto-elevates process to ensure successful HID, WMI, and Registry access.
+   - WMI SKU/Model Detection: Precise hardware identification querying BIOS strings.
+   - Thermal Mode Control: Direct WMI method calls for Quiet, Balanced, and Performance.
+   - Controller-to-Mouse Emulation: XInput polling for RS (Move), RB (Left Click), and RT (Right Click).
+   - CPU Temp Monitoring: Live polling of ACPI thermal zones in Celsius and Fahrenheit.
+   - Global Hotkey: Ctrl + G active for keyboard-based summoning.
+   - Tray Menu: Includes Mute, Gamebar Fix, Start with Windows, and Exit.
 */
 
-#define APP_VERSION L"0.127.2025.12.28"
-#define _WIN32_WINNT 0x0601 
-#define _WIN32_DCOM  
+#define APP_VERSION L"0.129.2026.01.02" // Application version for UI and logic
+#define _WIN32_WINNT 0x0601             // Target Windows 7 and above
+#define _WIN32_DCOM                     // Enable Distributed COM for WMI connectivity
 
-#include <windows.h>
-#include <comdef.h>  
-#include <WbemIdl.h> 
-#include <string>
-#include <shellapi.h>
-#include <vector>
-#include <Xinput.h>  
-#include <commctrl.h>
-#include <uxtheme.h> 
-#include <dwmapi.h>  
-#include "resource.h" 
+#include <windows.h>                    // Main Windows API header
+#include <comdef.h>                     // COM standard types
+#include <WbemIdl.h>                    // WMI interface definitions
+#include <string>                       // C++ Standard string library
+#include <shellapi.h>                   // Shell functionality (Tray/Elevation)
+#include <vector>                       // Standard vector container
+#include <thread>                       // Multi-threading support for HID polling
+#include <Xinput.h>                     // Xbox controller input API
+#include <commctrl.h>                   // Windows Common Controls
+#include <uxtheme.h>                    // Windows Themeing API
+#include <dwmapi.h>                     // Desktop Window Manager (UI Effects)
+#include "resource.h"                   // Resource IDs for icons and strings
 
 // --- LIBRARIES ---
-#pragma comment(lib, "wbemuuid.lib")
-#pragma comment(lib, "user32.lib")
-#pragma comment(lib, "shell32.lib")
-#pragma comment(lib, "gdi32.lib")
-#pragma comment(lib, "ole32.lib")
-#pragma comment(lib, "oleaut32.lib")
-#pragma comment(lib, "advapi32.lib")
-#pragma comment(lib, "Xinput.lib")
-#pragma comment(lib, "comctl32.lib")
-#pragma comment(lib, "uxtheme.lib")
-#pragma comment(lib, "dwmapi.lib")
+#pragma comment(lib, "wbemuuid.lib")    // Link WMI library
+#pragma comment(lib, "user32.lib")      // User interface link
+#pragma comment(lib, "shell32.lib")     // Shell operations link
+#pragma comment(lib, "gdi32.lib")       // Graphics link
+#pragma comment(lib, "ole32.lib")       // OLE/COM link
+#pragma comment(lib, "oleaut32.lib")    // Automation link
+#pragma comment(lib, "advapi32.lib")    // Registry/Security link
+#pragma comment(lib, "Xinput.lib")      // Controller input link
+#pragma comment(lib, "comctl32.lib")    // Common controls link
+#pragma comment(lib, "uxtheme.lib")     // UI theme link
+#pragma comment(lib, "dwmapi.lib")      // DWM link
 
 // --- CONSTANTS ---
-#define BTN_QUIET 101
-#define BTN_BALANCED 102
-#define BTN_PERFORMANCE 103
-#define BTN_MOUSE_TOGGLE 104
-#define SLIDER_SENSE 105
-#define WM_TRAYICON (WM_USER + 1)
-#define ID_TRAY_EXIT 201
-#define ID_TRAY_TOGGLE 202
-#define ID_TRAY_DISABLE_GB 203
-#define ID_TRAY_MUTE_APP 204
-#define ID_TRAY_START_WITH_WIN 205
+#define BTN_QUIET 101                   // Quiet Mode Button ID
+#define BTN_BALANCED 102                // Balanced Mode Button ID
+#define BTN_PERFORMANCE 103             // Performance Mode Button ID
+#define BTN_MOUSE_TOGGLE 104            // Mouse Emulation Toggle ID
+#define SLIDER_SENSE 105                // Sensitivity Slider ID
+#define BTN_CLOSE 107                   // Close (Hide) Button ID
+#define WM_TRAYICON (WM_USER + 1)       // Custom Tray Message ID
+#define ID_TRAY_EXIT 201                // Exit Menu ID
+#define ID_TRAY_TOGGLE 202              // Show/Hide Menu ID
+#define ID_TRAY_DISABLE_GB 203          // Gamebar Fix ID
+#define ID_TRAY_MUTE_APP 204            // Mute App ID
+#define ID_TRAY_START_WITH_WIN 205      // Auto-start Toggle ID
 
 // --- UI THEME COLORS ---
-#define CLR_BACK      RGB(20, 20, 20)
-#define CLR_CARD      RGB(45, 45, 45)
-#define CLR_TEXT      RGB(240, 240, 240)
-#define CLR_QUIET     RGB(0, 102, 204)
-#define CLR_BAL       RGB(255, 255, 255)
-#define CLR_PERF      RGB(178, 34, 34)
-#define CLR_RED       RGB(255, 0, 0)
-#define CLR_AURA      RGB(40, 40, 40)
-#define CLR_ACCENT    RGB(0, 180, 90)
-#define CLR_VERSION   RGB(160, 160, 160) 
-#define CLR_DISABLED  RGB(80, 80, 80)
+#define CLR_BACK      RGB(20, 20, 20)   // Background Black
+#define CLR_CARD      RGB(45, 45, 45)   // Component Gray
+#define CLR_TEXT      RGB(240, 240, 240)// Off-white Text
+#define CLR_QUIET     RGB(0, 102, 204)  // Lenovo Quiet Blue
+#define CLR_BAL       RGB(255, 255, 255)// Lenovo Balanced White
+#define CLR_PERF      RGB(178, 34, 34)  // Lenovo Performance Red
+#define CLR_RED       RGB(255, 0, 0)    // Border/Slider Red
+#define CLR_AURA      RGB(40, 40, 40)   // UI Aura Gray
+#define CLR_ACCENT    RGB(0, 180, 90)   // Active Success Green
+#define CLR_VERSION   RGB(160, 160, 160)// Muted Version Gray
+#define CLR_DISABLED  RGB(80, 80, 80)   // Disabled Element Gray
 
 // --- GLOBALS ---
-HWND g_hwnd = NULL;
-HHOOK g_hHook = NULL;
-NOTIFYICONDATAW g_nid = { 0 };
-HICON g_hMainIcon = NULL;
-HBRUSH g_hBackBrush = NULL; 
-bool g_appMuted = true;               // Default: Muted ON
-bool g_mouseEnabled = true;            
-int g_currentSenseVal = 5;            
-float g_mouseSensitivity = 5 * 0.0005f; 
+HWND g_hwnd = NULL;                     // Global Window Handle
+HHOOK g_hHook = NULL;                   // Global Keyboard Hook Handle
+NOTIFYICONDATAW g_nid = { 0 };          // Tray Icon Data Structure
+HICON g_hMainIcon = NULL;               // Application Icon Handle
+HBRUSH g_hBackBrush = NULL;             // Main Background Brush
+bool g_appMuted = true;                 // Mute audio by default
+bool g_mouseEnabled = true;             // Controller-to-mouse active state
+int g_currentSenseVal = 5;              // Mouse sensitivity slider pos
+float g_mouseSensitivity = 5 * 0.0005f; // Calculated movement speed
 
-const int WIN_WIDTH = 350;
-const int WIN_HEIGHT = 255;
+const int WIN_WIDTH = 350;              // App Width
+const int WIN_HEIGHT = 255;             // App Height
 
-// --- LOGIC: ELEVATION CHECK ---
+// --- LEGION TRIGGER CLASS (HID LISTENER) ---
+// Directly monitors hardware for the Legion R button press event
+class LegionTrigger {
+public:
+    static void Start(HWND targetWindow) {
+        // Run polling in a detached worker thread for Byte 18 monitor
+        std::thread([targetWindow]() {
+            MonitorController(targetWindow);
+        }).detach();
+    }
+
+private:
+    static void MonitorController(HWND targetWindow) {
+        // Raw hardware path for the Legion Go Controller interface
+        std::string devicePath = "\\\\?\\hid#vid_17ef&pid_61eb&mi_02#8&ece5261&0&0000#{4d1e55b2-f16f-11cf-88cb-001111000030}";
+        // Open file handle to the HID device for raw bytes reading
+        HANDLE hDevice = CreateFileA(devicePath.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+
+        if (hDevice == INVALID_HANDLE_VALUE) {
+            OutputDebugStringA("Failed to open HID device.\n");
+            return;
+        }
+
+        unsigned char buffer[64];
+        DWORD bytesRead = 0;
+        bool wasPressed = false;
+
+        while (true) {
+            // Read hardware input report
+            if (ReadFile(hDevice, buffer, 64, &bytesRead, NULL)) {
+                // Byte 18, Bit 6 contains the Legion R state (0x40)
+                bool isPressed = (buffer[18] & 0x40) == 0x40;
+                if (isPressed && !wasPressed) {
+                    // Command UI thread to toggle visibility
+                    PostMessage(targetWindow, WM_COMMAND, ID_TRAY_TOGGLE, 0);
+                    wasPressed = true;
+                } else if (!isPressed) {
+                    wasPressed = false;
+                }
+            } else break; // Device disconnected or error
+        }
+        CloseHandle(hDevice); // Handle cleanup
+    }
+};
+
+// --- LOGIC: ELEVATION ---
+// Check if the application is running with admin tokens
 bool IsRunAsAdmin() {
     BOOL fIsRunAsAdmin = FALSE;
     PSID pAdministratorsGroup = NULL;
     SID_IDENTIFIER_AUTHORITY NtAuthority = SECURITY_NT_AUTHORITY;
+    // Build Administrator group SID
     if (AllocateAndInitializeSid(&NtAuthority, 2, SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0, &pAdministratorsGroup)) {
         CheckTokenMembership(NULL, pAdministratorsGroup, &fIsRunAsAdmin);
         FreeSid(pAdministratorsGroup);
@@ -96,23 +145,20 @@ bool IsRunAsAdmin() {
     return fIsRunAsAdmin;
 }
 
+// Relaunch app with 'runas' verb to trigger UAC
 void ElevateNow() {
     wchar_t szPath[MAX_PATH];
     if (GetModuleFileNameW(NULL, szPath, MAX_PATH)) {
         SHELLEXECUTEINFOW sei = { sizeof(sei) };
-        sei.lpVerb = L"runas";
-        sei.lpFile = szPath;
-        sei.hwnd = NULL;
-        sei.nShow = SW_NORMAL;
-        if (!ShellExecuteExW(&sei)) return;
-        else exit(0);
+        sei.lpVerb = L"runas"; sei.lpFile = szPath; sei.hwnd = NULL; sei.nShow = SW_NORMAL;
+        if (!ShellExecuteExW(&sei)) return; else exit(0); // Exit non-admin instance
     }
 }
 
-// --- LOGIC: AUTO-START REGISTRY ---
+// --- LOGIC: AUTO-START ---
+// Check registry if app is in the 'Run' key
 bool IsAutoStartEnabled() {
-    HKEY hKey;
-    bool enabled = false;
+    HKEY hKey; bool enabled = false;
     if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
         if (RegQueryValueExW(hKey, L"GO-Helper", NULL, NULL, NULL, NULL) == ERROR_SUCCESS) enabled = true;
         RegCloseKey(hKey);
@@ -120,24 +166,22 @@ bool IsAutoStartEnabled() {
     return enabled;
 }
 
+// Add or remove app from Windows startup via Registry
 void SetAutoStart(bool enable) {
     HKEY hKey;
     if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_SET_VALUE, &hKey) == ERROR_SUCCESS) {
         if (enable) {
-            wchar_t path[MAX_PATH];
-            GetModuleFileNameW(NULL, path, MAX_PATH);
-            RegSetValueExW(hKey, L"GO-Helper", 0, REG_SZ, (const BYTE*)path, (wcslen(path) + 1) * sizeof(wchar_t));
-        } else {
-            RegDeleteValueW(hKey, L"GO-Helper");
-        }
+            wchar_t path[MAX_PATH]; GetModuleFileNameW(NULL, path, MAX_PATH);
+            RegSetValueExW(hKey, L"GO-Helper", 0, REG_SZ, (const BYTE*)path, (DWORD)((wcslen(path) + 1) * sizeof(wchar_t)));
+        } else RegDeleteValueW(hKey, L"GO-Helper");
         RegCloseKey(hKey);
     }
 }
 
-// --- LOGIC: CPU TEMPERATURE ---
+// --- LOGIC: SYSTEM POLLS ---
+// Poll MSAcpi_ThermalZoneTemperature via WMI for CPU thermals
 std::wstring GetCPUTempString() {
-    long tempDK = 0;
-    HRESULT hr = CoInitializeEx(0, COINIT_MULTITHREADED);
+    long tempDK = 0; HRESULT hr = CoInitializeEx(0, COINIT_MULTITHREADED);
     if (FAILED(hr) && hr != RPC_E_CHANGED_MODE) return L"CPU: --";
     IWbemLocator* pLoc = NULL;
     if (SUCCEEDED(CoCreateInstance(__uuidof(WbemLocator), 0, CLSCTX_INPROC_SERVER, __uuidof(IWbemLocator), (LPVOID*)&pLoc))) {
@@ -148,8 +192,7 @@ std::wstring GetCPUTempString() {
             if (SUCCEEDED(pSvc->ExecQuery(_bstr_t(L"WQL"), _bstr_t(L"SELECT CurrentTemperature FROM MSAcpi_ThermalZoneTemperature"), WBEM_FLAG_FORWARD_ONLY, NULL, &pEnum))) {
                 IWbemClassObject* pObj = NULL; ULONG uRet = 0;
                 if (SUCCEEDED(pEnum->Next(WBEM_INFINITE, 1, &pObj, &uRet)) && uRet > 0) {
-                    VARIANT vt;
-                    if (SUCCEEDED(pObj->Get(L"CurrentTemperature", 0, &vt, 0, 0))) { tempDK = vt.lVal; VariantClear(&vt); }
+                    VARIANT vt; if (SUCCEEDED(pObj->Get(L"CurrentTemperature", 0, &vt, 0, 0))) { tempDK = vt.lVal; VariantClear(&vt); }
                     pObj->Release();
                 }
                 pEnum->Release();
@@ -160,13 +203,14 @@ std::wstring GetCPUTempString() {
     }
     CoUninitialize();
     if (tempDK <= 0) return L"CPU: --";
+    // Convert 10ths of Kelvin to C and F
     double celsius = (tempDK / 10.0) - 273.15;
     double fahrenheit = (celsius * 9.0 / 5.0) + 32.0;
     wchar_t buf[64]; swprintf_s(buf, L"CPU: %.0f°C / %.0f°F", celsius, fahrenheit);
     return std::wstring(buf);
 }
 
-// --- LOGIC: GAMEBAR FIX ---
+// Kill GameBar recording and app capturing popups via Registry
 void DisableGameBarRegistry() {
     HKEY hKey;
     if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\GameDVR", 0, KEY_SET_VALUE, &hKey) == ERROR_SUCCESS) {
@@ -178,27 +222,25 @@ void DisableGameBarRegistry() {
     MessageBoxW(NULL, L"Game Bar features disabled. Restart recommended.", L"GO-Helper", MB_OK | MB_ICONINFORMATION);
 }
 
-// --- LOGIC: THERMAL & BATTERY ---
+// Get Lenovo Smart Fan mode from WMI
 std::wstring GetThermalModeString() {
-    int mode = 0;
-    HRESULT hr = CoInitializeEx(0, COINIT_MULTITHREADED);
+    int mode = 0; HRESULT hr = CoInitializeEx(0, COINIT_MULTITHREADED);
     if (FAILED(hr) && hr != RPC_E_CHANGED_MODE) return L"Unknown";
     IWbemLocator* pLoc = NULL;
     if (SUCCEEDED(CoCreateInstance(__uuidof(WbemLocator), 0, CLSCTX_INPROC_SERVER, __uuidof(IWbemLocator), (LPVOID*)&pLoc))) {
         IWbemServices* pSvc = NULL;
         if (SUCCEEDED(pLoc->ConnectServer(_bstr_t(L"ROOT\\WMI"), NULL, NULL, 0, NULL, 0, 0, &pSvc))) {
             CoSetProxyBlanket(pSvc, RPC_C_AUTHN_WINNT, RPC_C_AUTHN_NONE, NULL, RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE, NULL, EOAC_NONE);
-            _bstr_t className(L"LENOVO_GAMEZONE_DATA");
-            IEnumWbemClassObject* pEnum = NULL;
+            _bstr_t className(L"LENOVO_GAMEZONE_DATA"); IEnumWbemClassObject* pEnum = NULL;
             if (SUCCEEDED(pSvc->CreateInstanceEnum(className, 0, NULL, &pEnum))) {
                 IWbemClassObject* pInst = NULL; ULONG uRet = 0;
                 if (pEnum->Next(WBEM_INFINITE, 1, &pInst, &uRet) == WBEM_S_NO_ERROR) {
                     VARIANT vtPath;
                     if (SUCCEEDED(pInst->Get(L"__PATH", 0, &vtPath, NULL, NULL))) {
                         IWbemClassObject* pOut = NULL;
+                        // Call Lenovo specific fan mode method
                         if (SUCCEEDED(pSvc->ExecMethod(vtPath.bstrVal, _bstr_t(L"GetSmartFanMode"), 0, NULL, NULL, &pOut, NULL))) {
-                            VARIANT vtRes;
-                            if (SUCCEEDED(pOut->Get(L"Data", 0, &vtRes, NULL, NULL))) { mode = vtRes.lVal; VariantClear(&vtRes); }
+                            VARIANT vtRes; if (SUCCEEDED(pOut->Get(L"Data", 0, &vtRes, NULL, NULL))) { mode = vtRes.lVal; VariantClear(&vtRes); }
                             pOut->Release();
                         }
                         VariantClear(&vtPath);
@@ -212,33 +254,29 @@ std::wstring GetThermalModeString() {
         pLoc->Release();
     }
     CoUninitialize();
-    if (mode == 1) return L"Quiet";
-    if (mode == 2) return L"Balanced";
-    if (mode == 3) return L"Performance";
+    if (mode == 1) return L"Quiet"; if (mode == 2) return L"Balanced"; if (mode == 3) return L"Performance";
     return L"Unknown";
 }
 
+// Fetch battery percentage and status from System Power
 std::wstring GetBatteryStatusString() {
-    SYSTEM_POWER_STATUS sps;
-    if (!GetSystemPowerStatus(&sps)) return L"Battery: Unknown";
+    SYSTEM_POWER_STATUS sps; if (!GetSystemPowerStatus(&sps)) return L"Battery: Unknown";
     std::wstring status = L"Battery: ";
-    if (sps.ACLineStatus == 1) status += L"Plugged In";
-    else status += L"Discharging";
+    status += (sps.ACLineStatus == 1) ? L"Plugged In" : L"Discharging";
     status += L" @ " + std::to_wstring((int)sps.BatteryLifePercent) + L"%";
     return status;
 }
 
+// Write new Smart Fan value to BIOS through WMI
 bool SetThermalMode(int value) {
-    bool success = false;
-    HRESULT hr = CoInitializeEx(0, COINIT_MULTITHREADED);
+    bool success = false; HRESULT hr = CoInitializeEx(0, COINIT_MULTITHREADED);
     if (FAILED(hr) && hr != RPC_E_CHANGED_MODE) return false;
     IWbemLocator* pLoc = NULL;
     if (SUCCEEDED(CoCreateInstance(__uuidof(WbemLocator), 0, CLSCTX_INPROC_SERVER, __uuidof(IWbemLocator), (LPVOID*)&pLoc))) {
         IWbemServices* pSvc = NULL;
         if (SUCCEEDED(pLoc->ConnectServer(_bstr_t(L"ROOT\\WMI"), NULL, NULL, 0, NULL, 0, 0, &pSvc))) {
             CoSetProxyBlanket(pSvc, RPC_C_AUTHN_WINNT, RPC_C_AUTHN_NONE, NULL, RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE, NULL, EOAC_NONE);
-            _bstr_t className(L"LENOVO_GAMEZONE_DATA");
-            IWbemClassObject* pClass = NULL;
+            _bstr_t className(L"LENOVO_GAMEZONE_DATA"); IWbemClassObject* pClass = NULL;
             if (SUCCEEDED(pSvc->GetObject(className, 0, NULL, &pClass, NULL))) {
                 IWbemClassObject* pInDef = NULL;
                 if (SUCCEEDED(pClass->GetMethod(_bstr_t(L"SetSmartFanMode"), 0, &pInDef, NULL)) && pInDef) {
@@ -250,6 +288,7 @@ bool SetThermalMode(int value) {
                         if (pEnum->Next(WBEM_INFINITE, 1, &pInst, &uRet) == WBEM_S_NO_ERROR) {
                             VARIANT path;
                             if (SUCCEEDED(pInst->Get(L"__PATH", 0, &path, NULL, NULL))) {
+                                // Execute the mode set command
                                 if (SUCCEEDED(pSvc->ExecMethod(path.bstrVal, _bstr_t(L"SetSmartFanMode"), 0, NULL, pInInst, NULL, NULL))) success = true;
                                 VariantClear(&path);
                             }
@@ -270,7 +309,7 @@ bool SetThermalMode(int value) {
     return success;
 }
 
-// --- LOGIC: SKU DETECTION ---
+// Fetch model and SKU for UI title display
 std::wstring GetSystemSKU() {
     std::wstring biosModel = L""; std::wstring biosSKU = L"";
     HRESULT hr = CoInitializeEx(0, COINIT_MULTITHREADED);
@@ -283,11 +322,8 @@ std::wstring GetSystemSKU() {
             if (SUCCEEDED(pSvc->ExecQuery(_bstr_t(L"WQL"), _bstr_t(L"SELECT Name, SKUNumber FROM Win32_ComputerSystemProduct"), WBEM_FLAG_FORWARD_ONLY, NULL, &pEnum))) {
                 IWbemClassObject* pObj = NULL; ULONG uRet = 0;
                 if (SUCCEEDED(pEnum->Next(WBEM_INFINITE, 1, &pObj, &uRet)) && uRet > 0) {
-                    VARIANT vt;
-                    if (SUCCEEDED(pObj->Get(L"Name", 0, &vt, 0, 0)) && vt.vt == VT_BSTR) biosModel = vt.bstrVal;
-                    VariantClear(&vt);
-                    if (SUCCEEDED(pObj->Get(L"SKUNumber", 0, &vt, 0, 0)) && vt.vt == VT_BSTR) biosSKU = vt.bstrVal;
-                    VariantClear(&vt);
+                    VARIANT vt; if (SUCCEEDED(pObj->Get(L"Name", 0, &vt, 0, 0))) { biosModel = vt.bstrVal; VariantClear(&vt); }
+                    if (SUCCEEDED(pObj->Get(L"SKUNumber", 0, &vt, 0, 0))) { biosSKU = vt.bstrVal; VariantClear(&vt); }
                     pObj->Release();
                 }
                 pEnum->Release();
@@ -312,20 +348,11 @@ void RepositionToBottomRight(HWND hwnd) {
 }
 
 void ToggleVisibility(HWND hwnd) {
-    if (IsWindowVisible(hwnd)) {
-        ShowWindow(hwnd, SW_HIDE);
-    } else {
+    if (IsWindowVisible(hwnd)) ShowWindow(hwnd, SW_HIDE);
+    else {
         RepositionToBottomRight(hwnd);
-        ShowWindow(hwnd, SW_SHOW);
-        
-        // --- v127 ENHANCED FOCUS LOGIC ---
-        ShowWindow(hwnd, SW_RESTORE); 
-        UpdateWindow(hwnd); 
-        SetForegroundWindow(hwnd);    
-        SetActiveWindow(hwnd);
-        SetFocus(hwnd);
-        
-        // Force focus by attaching thread input if necessary
+        ShowWindow(hwnd, SW_SHOW); ShowWindow(hwnd, SW_RESTORE); 
+        UpdateWindow(hwnd); SetForegroundWindow(hwnd); SetActiveWindow(hwnd); SetFocus(hwnd);
         DWORD dwCurThread = GetCurrentThreadId();
         DWORD dwFGThread = GetWindowThreadProcessId(GetForegroundWindow(), NULL);
         if (dwCurThread != dwFGThread) {
@@ -439,13 +466,16 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         CreateWindowW(L"BUTTON", L"", WS_VISIBLE | WS_CHILD | BS_OWNERDRAW, 125, 75, 100, 35, hwnd, (HMENU)BTN_BALANCED, NULL, NULL);
         CreateWindowW(L"BUTTON", L"", WS_VISIBLE | WS_CHILD | BS_OWNERDRAW, 230, 75, 100, 35, hwnd, (HMENU)BTN_PERFORMANCE, NULL, NULL);
         CreateWindowW(L"BUTTON", L"", WS_VISIBLE | WS_CHILD | BS_OWNERDRAW, 20, 145, 100, 35, hwnd, (HMENU)BTN_MOUSE_TOGGLE, NULL, NULL);
+        
+        CreateWindowW(L"BUTTON", L"✕", WS_VISIBLE | WS_CHILD | BS_OWNERDRAW, WIN_WIDTH - 35, 10, 25, 25, hwnd, (HMENU)BTN_CLOSE, NULL, NULL);
 
         hSlider = CreateWindowW(TRACKBAR_CLASSW, L"", WS_VISIBLE | WS_CHILD | TBS_HORZ | TBS_NOTICKS, 135, 157, 206, 30, hwnd, (HMENU)SLIDER_SENSE, NULL, NULL);
         SetWindowTheme(hSlider, L"", L""); SetWindowSubclass(hSlider, SliderSubclassProc, 0, 0);
         SendMessage(hSlider, TBM_SETRANGE, TRUE, MAKELONG(1, 50));
         SendMessage(hSlider, TBM_SETPOS, TRUE, g_currentSenseVal);
 
-        SetThermalMode(2); // Auto-set Balanced on startup
+        SetThermalMode(2); 
+        LegionTrigger::Start(hwnd);
 
         refreshTimer = SetTimer(hwnd, 1, 3000, NULL);
         COLORREF auraColor = CLR_AURA; DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &auraColor, sizeof(auraColor));
@@ -502,10 +532,25 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         LPDRAWITEMSTRUCT pdis = (LPDRAWITEMSTRUCT)lParam;
         bool prs = (pdis->itemState & ODS_SELECTED);
         SelectObject(pdis->hDC, hFontBold);
-        if (pdis->CtlID == BTN_QUIET) DrawGButton(pdis->hDC, pdis->rcItem, L"Quiet", CLR_QUIET, prs);
-        else if (pdis->CtlID == BTN_BALANCED) DrawGButton(pdis->hDC, pdis->rcItem, L"Balanced", CLR_BAL, prs);
-        else if (pdis->CtlID == BTN_PERFORMANCE) DrawGButton(pdis->hDC, pdis->rcItem, L"Performance", CLR_PERF, prs);
-        else if (pdis->CtlID == BTN_MOUSE_TOGGLE) DrawGButton(pdis->hDC, pdis->rcItem, g_mouseEnabled ? L"Mouse" : L"Gamepad", g_mouseEnabled ? CLR_ACCENT : CLR_CARD, prs);
+        
+        if (pdis->CtlID == BTN_CLOSE) {
+            HBRUSH hBlackBg = CreateSolidBrush(RGB(0, 0, 0));
+            HPEN hRedBorder = CreatePen(PS_SOLID, 1, CLR_RED);
+            HGDIOBJ oldBrush = SelectObject(pdis->hDC, hBlackBg);
+            HGDIOBJ oldPen = SelectObject(pdis->hDC, hRedBorder);
+            RoundRect(pdis->hDC, pdis->rcItem.left, pdis->rcItem.top, pdis->rcItem.right, pdis->rcItem.bottom, 8, 8);
+            SetTextColor(pdis->hDC, RGB(255, 255, 255));
+            SetBkMode(pdis->hDC, TRANSPARENT);
+            DrawTextW(pdis->hDC, L"✕", -1, &pdis->rcItem, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            SelectObject(pdis->hDC, oldBrush); SelectObject(pdis->hDC, oldPen);
+            DeleteObject(hBlackBg); DeleteObject(hRedBorder);
+        }
+        else {
+            if (pdis->CtlID == BTN_QUIET) DrawGButton(pdis->hDC, pdis->rcItem, L"Quiet", CLR_QUIET, prs);
+            else if (pdis->CtlID == BTN_BALANCED) DrawGButton(pdis->hDC, pdis->rcItem, L"Balanced", CLR_BAL, prs);
+            else if (pdis->CtlID == BTN_PERFORMANCE) DrawGButton(pdis->hDC, pdis->rcItem, L"Performance", CLR_PERF, prs);
+            else if (pdis->CtlID == BTN_MOUSE_TOGGLE) DrawGButton(pdis->hDC, pdis->rcItem, g_mouseEnabled ? L"Mouse" : L"Gamepad", g_mouseEnabled ? CLR_ACCENT : CLR_CARD, prs);
+        }
         return TRUE;
     }
 
@@ -522,6 +567,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             case BTN_BALANCED: SetThermalMode(2); InvalidateRect(hwnd, NULL, FALSE); break;
             case BTN_PERFORMANCE: SetThermalMode(3); InvalidateRect(hwnd, NULL, FALSE); break;
             case BTN_MOUSE_TOGGLE: g_mouseEnabled = !g_mouseEnabled; EnableWindow(hSlider, g_mouseEnabled); InvalidateRect(hwnd, NULL, TRUE); break;
+            case BTN_CLOSE: ToggleVisibility(hwnd); break; 
             case ID_TRAY_MUTE_APP: g_appMuted = !g_appMuted; break;
             case ID_TRAY_DISABLE_GB: DisableGameBarRegistry(); break;
             case ID_TRAY_START_WITH_WIN: SetAutoStart(!IsAutoStartEnabled()); break;
@@ -555,30 +601,20 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
     return DefWindowProcW(hwnd, uMsg, wParam, lParam);
 }
 
-// --- KEYBOARD HOOK: INTERCEPT HARDWARE BUTTONS ---
 LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
     if (nCode == HC_ACTION && (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN)) {
         KBDLLHOOKSTRUCT* pK = (KBDLLHOOKSTRUCT*)lParam;
-        
-        bool isWinDown = (GetAsyncKeyState(VK_LWIN) & 0x8000) || (GetAsyncKeyState(VK_RWIN) & 0x8000);
-        bool isShiftDown = (GetAsyncKeyState(VK_SHIFT) & 0x8000);
         bool isCtrlDown = (GetAsyncKeyState(VK_CONTROL) & 0x8000);
-
-        // Capture Legion L, Legion X, PrintScreen, Win+Shift+S, and Ctrl+G
-        if (pK->vkCode == VK_SNAPSHOT || (isWinDown && isShiftDown && pK->vkCode == 'S') || (isCtrlDown && pK->vkCode == 'G')) {
+        if (isCtrlDown && pK->vkCode == 'G') {
             ToggleVisibility(g_hwnd);
-            return 1; 
+            return 1;
         }
     }
     return CallNextHookEx(g_hHook, nCode, wParam, lParam);
 }
 
 int WINAPI wWinMain(HINSTANCE hI, HINSTANCE, PWSTR, int) {
-    // STARTUP ELEVATION CHECK
-    if (!IsRunAsAdmin()) {
-        ElevateNow();
-        return 0;
-    }
+    if (!IsRunAsAdmin()) { ElevateNow(); return 0; }
 
     INITCOMMONCONTROLSEX ic = { sizeof(ic), ICC_BAR_CLASSES }; InitCommonControlsEx(&ic);
     WNDCLASSW wc = { 0 }; wc.lpfnWndProc = WindowProc; wc.hInstance = hI; wc.lpszClassName = L"GOHCLASS";
@@ -594,13 +630,8 @@ int WINAPI wWinMain(HINSTANCE hI, HINSTANCE, PWSTR, int) {
     ShowWindow(g_hwnd, SW_HIDE);
     MSG m;
     while (true) {
-        if (PeekMessage(&m, NULL, 0, 0, PM_REMOVE)) { 
-            if (m.message == WM_QUIT) break; 
-            TranslateMessage(&m); 
-            DispatchMessage(&m); 
-        }
-        ProcessControllerMouse(); 
-        Sleep(5); // Balance between 200Hz polling and CPU efficiency
+        if (PeekMessage(&m, NULL, 0, 0, PM_REMOVE)) { if (m.message == WM_QUIT) break; TranslateMessage(&m); DispatchMessage(&m); }
+        ProcessControllerMouse(); Sleep(5); 
     }
     if (g_hHook) UnhookWindowsHookEx(g_hHook);
     return 0;
