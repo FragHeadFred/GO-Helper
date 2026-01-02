@@ -1,10 +1,18 @@
 # GO-Helper (v0.129)
 
-**GO-Helper** is a high-performance, lightweight Win32 utility designed specifically for the Lenovo Legion Go. It replaces heavy OEM software with a native C++ tool providing essential hardware controls, controller-to-mouse emulation, and system monitoring all within an ultra-lean **2.6MB memory footprint**.
+**GO-Helper** is a high-performance, lightweight Win32 utility designed specifically for the Lenovo Legion Go. It replaces heavy OEM software with a native C++ tool providing essential hardware controls, controller-to-mouse emulation, and system monitoring all within an ultra-lean 2.6MB memory footprint.
 
 ---
 
 ## [:floppy_disk: Download](https://github.com/FragHeadFred/GO-Helper/releases/download/v.0.129.2026.01.02-alpha/GO-Helper.exe)
+
+---
+## ☕ Support the Project
+
+If you find **GO-Helper** useful and would like to support its continued development and maintenance, consider making a donation.
+
+[**Donate via PayPal**](https://www.paypal.com/donate/?hosted_button_id=PA5MTBGWQMUP4)
+
 
 ## 🚀 Full Feature List
 
@@ -20,7 +28,7 @@
     * **RS (Right Stick):** High-polling mouse cursor movement.
     * **RB (Right Bumper):** Left Mouse Click.
     * **RT (Right Trigger):** Right Mouse Click.
-* **Dynamic Sensitivity:** Custom-rendered "Red Ball" slider for 1%â€“100% sensitivity adjustments with a real-time aura-glow tracker.
+* **Dynamic Sensitivity:** Custom-rendered "Red Ball" slider for 1-100% sensitivity adjustments with a real-time aura-glow tracker.
 * **Global Hotkey:** Full support for `Ctrl + G` summoning via low-level keyboard hook.
 
 ### 📟 Real-time Monitoring
@@ -46,7 +54,7 @@
 | **Right Bumper (RB)** | Left Mouse Click |
 | **Right Trigger (RT)** | Right Mouse Click |
 | **Ctrl + G** | Toggle GO-Helper Menu (Keyboard) |
-| **Close Button (âœ•)** | Hide UI to Tray |
+| **Close Button (✕)** | Hide UI to Tray |
 
 ---
 
