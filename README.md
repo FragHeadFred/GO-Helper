@@ -4,7 +4,7 @@
 
 ---
 
-## [:floppy_disk: Download](https://github.com/FragHeadFred/GO-Helper/archive/refs/tags/v.0.129.2026.01.02-alpha.zip)
+## [:floppy_disk: Download](https://github.com/FragHeadFred/GO-Helper/releases/download/v.0.129.2026.01.02-alpha/GO-Helper.exe)
 
 ## 🚀 Full Feature List
 
