@@ -13,7 +13,7 @@ If you find **GO-Helper** useful and would like to support its continued develop
 
 [**Donate via PayPal**](https://www.paypal.com/donate/?hosted_button_id=PA5MTBGWQMUP4)
 
-
+---
 ## 🚀 Full Feature List
 
 ### 🛠  Hardware & System Control
