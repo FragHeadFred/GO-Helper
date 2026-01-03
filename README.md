@@ -6,7 +6,6 @@
 
 ## [:floppy_disk: Download](https://github.com/FragHeadFred/GO-Helper/releases/download/v.0.129.2026.01.02-alpha/GO-Helper.exe)
 
----
 ## ☕ Support the Project
 
 If you find **GO-Helper** useful and would like to support its continued development and maintenance, consider making a donation.
@@ -14,6 +13,7 @@ If you find **GO-Helper** useful and would like to support its continued develop
 [**Donate via PayPal**](https://www.paypal.com/donate/?hosted_button_id=PA5MTBGWQMUP4)
 
 ---
+
 ## 🚀 Full Feature List
 
 ### 🛠  Hardware & System Control
