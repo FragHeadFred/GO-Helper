@@ -1,4 +1,4 @@
-# GO-Helper (v0.129)
+# GO-Helper (v0.131)
 
 **GO-Helper** is a high-performance, lightweight Win32 utility designed specifically for the Lenovo Legion Go. It replaces heavy OEM software with a native C++ tool providing essential hardware controls, controller-to-mouse emulation, and system monitoring all within an ultra-lean 2.6MB memory footprint.
 
@@ -77,6 +77,8 @@ If you find **GO-Helper** useful and would like to support its continued develop
 ---
 
 ## 📜 Version History (v0.129.2026.01.02)
+* **v0.131:** Implemented Touchpad support and ability to toggle between it, analog, and off.
+* **v0.130:** Implemented about window in systray menu.
 * **v0.129:** Implemented Close/Hide UI button and real-time Battery/Charge tracking.
 * **v0.128:** Added Hardware-level Raw HID listener for Legion R button support.
 * **v0.127:** Integrated Admin Check and advanced Topmost focus-stealing logic.
