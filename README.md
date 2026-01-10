@@ -1,3 +1,5 @@
+# GO-Helper (v0.140)
+
 **GO-Helper** is a high-performance, lightweight Win32 utility designed specifically for the Lenovo Legion Go. It replaces heavy OEM software with a surgical, native C++ tool providing essential hardware controls, controller-to-mouse emulation, and system monitoring—all within an ultra-lean footprint.
 
 ---
