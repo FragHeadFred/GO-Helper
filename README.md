@@ -1,4 +1,4 @@
-# GO-Helper (v0.140)
+# GO-Helper (v0.160)
 
 **GO-Helper** is a high-performance, lightweight Win32 utility designed specifically for the Lenovo Legion Go. It replaces heavy OEM software with a surgical, native C++ tool providing essential hardware controls, controller-to-mouse emulation, and system monitoring—all within an ultra-lean footprint.
 
@@ -21,7 +21,7 @@ If you find **GO-Helper** useful and would like to support its continued develop
 * **TDP Control:** Unlocked **Custom Mode (Electric Purple)** allowing precision TDP injection from **9W to 30W** via direct WMI method calls.
 * **Brightness Control:** Native WMI-integrated brightness slider for seamless screen adjustments.
 * **Thermal Mode Profiles:** Direct WMI injection for **Quiet (9W)**, **Balanced (15W)**, and **Performance (20W)** profiles.
-* **Legion R Listener:** High-speed raw HID implementation monitoring Byte 18, Bit 6. Pressing the Legion R button instantly toggles UI visibility.
+* **Legion L & R Listener:** High-speed raw HID implementation monitoring Byte 18, Bit 6. Pressing the Legion R button instantly toggles UI visibility.
 * **Admin Check:** Integrated security token verification; the app auto-elevates on startup to ensure WMI, Registry, and HID access.
 * **MS-Gamebar Fix:** Integrated registry patcher to suppress intrusive Windows Game Bar pop-ups during gameplay.
 
@@ -54,6 +54,7 @@ If you find **GO-Helper** useful and would like to support its continued develop
 
 | Input | Action |
 | :--- | :--- |
+| **Legion L Button** | Launch Steam / Steam Menu |
 | **Legion R Button** | Summon / Hide GO-Helper |
 | **Right Stick (RS)** | Mouse Cursor Movement (Analog Mode) |
 | **Touchpad Tap** | Left/Right Click (Touchpad Mode) |
