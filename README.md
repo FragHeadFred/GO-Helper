@@ -26,7 +26,7 @@ If you find **GO-Helper** useful and would like to support its continued develop
 * **MS-Gamebar Fix:** Integrated registry patcher to suppress intrusive Windows Game Bar pop-ups during gameplay.
 * **RGB LED Controller:** Intergrated ablitity to turn On/Off LEDs, choose custom color, preset Rainbow pattern (BIOS), custom color Pulsing (Custom programming built into GO-Helper)
 * **Windows Sound Control:** Integrated ability to control system audio levels and mute.
-* 
+* **FPS Counter:** Implemented very simple FPS Counter in top right corner (DirectX Hook)
 
 ### 🎮 Input & Navigation
 * **Threaded Input:** Controller and Mouse polling run in an isolated background thread to ensure zero lag in the System Tray and UI.
@@ -87,7 +87,8 @@ If you find **GO-Helper** useful and would like to support its continued develop
 ---
 
 ## 📜 Version History
-* **v0.140:** Implemented Screen Hz Toggle, Brightness Slider, and forced repaint logic for all child components. Updated UI to Bold headers and "DONATE" caps.
+* **v0.160:** Implemented Custom LED Controls, Windows Audio Control, FPS Counter (DirectX Hook)
+* **v0.140:** Implemented Screen Hz Toggle, Brightness Slider, and forced repaint logic for all child components.
 * **v0.133:** Fixed GDI variable declaration conflicts (C2065) in the About window.
 * **v0.132:** Added TDP Slider (9W-30W), Custom Thermal Mode, and adjusted layout spacing/button alignment.
 * **v0.131:** Offloaded Controller input to a separate thread; implemented Touchpad Tap-to-Click logic.
