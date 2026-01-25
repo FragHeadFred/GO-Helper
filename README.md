@@ -24,6 +24,9 @@ If you find **GO-Helper** useful and would like to support its continued develop
 * **Legion L & R Listener:** High-speed raw HID implementation monitoring Byte 18, Bit 6. Pressing the Legion R button instantly toggles UI visibility.
 * **Admin Check:** Integrated security token verification; the app auto-elevates on startup to ensure WMI, Registry, and HID access.
 * **MS-Gamebar Fix:** Integrated registry patcher to suppress intrusive Windows Game Bar pop-ups during gameplay.
+* **RGB LED Controller:** Intergrated ablitity to turn On/Off LEDs, choose customer color, preset Rainbow pattern (BIOS), custom color Pulsing (Custom programming built into GO-Helper)
+* **Windows Sound Control:** Integrated ability to control system audio levels and mute.
+* 
 
 ### 🎮 Input & Navigation
 * **Threaded Input:** Controller and Mouse polling run in an isolated background thread to ensure zero lag in the System Tray and UI.
